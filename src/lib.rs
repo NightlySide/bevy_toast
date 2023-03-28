@@ -2,7 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use bevy::prelude::*;
 use bevy_tweening::{
-    lens::UiPositionLens, Animator, Delay, EaseFunction, Sequence, Tween, TweeningType,
+    lens::UiPositionLens, Animator, Delay, EaseFunction, RepeatCount, Sequence, Tween,
 };
 
 const TOAST_WIDTH: f32 = 300.;
@@ -17,7 +17,7 @@ impl Plugin for ToastPlugin {
         app.add_event::<ShowToast>()
             .insert_resource(ToastQueue::default())
             .add_startup_system(build_ui)
-            .add_system(always_on_top)
+            //.add_system(always_on_top)
             .add_system(toast_evt_reader)
             .add_system(display_toast);
     }
@@ -37,51 +37,52 @@ impl ShowToast {
     pub fn get_animation(&self) -> Sequence<Style> {
         let close_animation = Tween::new(
             EaseFunction::CubicInOut,
-            TweeningType::Once,
             std::time::Duration::from_secs(1),
             UiPositionLens {
-                start: Rect {
+                start: UiRect {
                     left: Val::Auto,
                     top: Val::Px(5.),
                     right: Val::Px(5.),
                     bottom: Val::Auto,
                 },
-                end: Rect {
+                end: UiRect {
                     left: Val::Auto,
                     top: Val::Px(-100.),
                     right: Val::Px(5.),
                     bottom: Val::Auto,
                 },
             },
-        );
+        )
+        .with_repeat_count(RepeatCount::Finite(1));
 
         let delay = Delay::new(self.duration);
 
         let open_animation = Tween::new(
             EaseFunction::CubicInOut,
-            TweeningType::Once,
             std::time::Duration::from_secs_f32(0.5),
             UiPositionLens {
-                end: Rect {
+                end: UiRect {
                     left: Val::Auto,
                     top: Val::Px(5.),
                     right: Val::Px(5.),
                     bottom: Val::Auto,
                 },
-                start: Rect {
+                start: UiRect {
                     left: Val::Auto,
                     top: Val::Px(-100.),
                     right: Val::Px(5.),
                     bottom: Val::Auto,
                 },
             },
-        );
+        )
+        .with_repeat_count(RepeatCount::Finite(1));
 
         open_animation.then(delay.then(close_animation))
     }
 }
 
 /// Queue of toast to display
+#[derive(Resource)]
 struct ToastQueue {
     queue: VecDeque<ShowToast>,
 }
@@ -107,17 +108,18 @@ struct ToastSubtitle;
 
 // --------------- SYSTEMS --------------- //
 
+// BUG: This actually breaks things now, commenting out for now.
 /// system which puts the toast always on top of everything
 /// in order to fight the default impl of bevy's ui
-fn always_on_top(mut query: Query<&mut GlobalTransform, With<ToastUI>>) {
-    for mut transform in query.iter_mut() {
+/*fn always_on_top(mut query: Query<&mut Transform, With<ToastUI>>) {
+    for mut transform in &mut query {
         transform.translation.z = f32::MAX;
     }
-}
+}*/
 
 /// reads events and put the toasts into the queue
 fn toast_evt_reader(mut evt_reader: EventReader<ShowToast>, mut queue: ResMut<ToastQueue>) {
-    for toast_info in evt_reader.iter() {
+    for toast_info in &mut evt_reader {
         // anti spam
         let matching_toast = queue
             .queue
@@ -147,12 +149,14 @@ fn display_toast(
 
     // if the animation is finished, then the previous toast is hidden
     // we can show the next one if the queue is not empty
-    if (animator.progress() == 0.0 || animator.progress() == 1.0) && !queue.queue.is_empty() {
+    if (animator.tweenable().progress() == 0.0 || animator.tweenable().progress() == 1.0)
+        && !queue.queue.is_empty()
+    {
         let next_toast = queue.queue.pop_front().unwrap();
         title.sections[0].value = next_toast.title.clone();
         subtitle.sections[0].value = next_toast.subtitle.clone();
         animator.set_tweenable(next_toast.get_animation());
-        animator.rewind();
+        animator.tweenable_mut().rewind();
     }
 }
 
@@ -164,7 +168,7 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     let container = ImageBundle {
         style: Style {
             position_type: PositionType::Absolute,
-            position: Rect {
+            position: UiRect {
                 top: Val::Px(-100.),
                 right: Val::Px(5.),
                 ..Default::default()
@@ -172,7 +176,7 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             size: Size::new(Val::Px(TOAST_WIDTH), Val::Px(TOAST_HEIGHT)),
             ..Default::default()
         },
-        color: Color::rgba_u8(0, 0, 0, 0).into(),
+        background_color: Color::rgba_u8(0, 0, 0, 0).into(),
         ..Default::default()
     };
 
@@ -184,7 +188,7 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             justify_content: JustifyContent::Center,
             flex_direction: FlexDirection::ColumnReverse,
             flex_grow: 1.,
-            padding: Rect {
+            padding: UiRect {
                 left: Val::Px(20.),
                 right: Val::Px(20.),
                 top: Val::Px(15.),
@@ -196,7 +200,7 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     };
 
     let toast_title_text = TextBundle {
-        text: Text::with_section(
+        text: Text::from_section(
             "Advancement Made!",
             TextStyle {
                 font_size: 24.,
@@ -204,16 +208,13 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 color: Color::rgb_u8(205, 205, 100).into(),
                 ..Default::default()
             },
-            TextAlignment {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Center,
-            },
-        ),
+        )
+        .with_alignment(TextAlignment::Center),
         ..Default::default()
     };
 
     let toast_subtitle_text = TextBundle {
-        text: Text::with_section(
+        text: Text::from_section(
             "Iron tools",
             TextStyle {
                 font_size: 24.,
@@ -221,28 +222,25 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 color: Color::rgb_u8(205, 205, 205).into(),
                 ..Default::default()
             },
-            TextAlignment {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Center,
-            },
-        ),
+        )
+        .with_alignment(TextAlignment::Center),
         ..Default::default()
     };
 
     // building ui tree
     commands
-        .spawn_bundle(container)
+        .spawn(container)
         .with_children(|parent| {
             parent
-                .spawn_bundle(background_image)
+                .spawn(background_image)
                 .with_children(|parent| {
                     parent
-                        .spawn_bundle(toast_title_text)
+                        .spawn(toast_title_text)
                         .insert(Name::new("Toast title"))
                         .insert(ToastTitle);
 
                     parent
-                        .spawn_bundle(toast_subtitle_text)
+                        .spawn(toast_subtitle_text)
                         .insert(Name::new("Toast subtitle"))
                         .insert(ToastSubtitle);
                 })
@@ -250,5 +248,22 @@ fn build_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         })
         .insert(Name::new("Toast container"))
         .insert(ToastUI)
-        .insert(Animator::<Style>::default());
+        .insert(Animator::<Style>::new(Tween::<Style>::new(
+            EaseFunction::QuadraticInOut,
+            Duration::from_secs(0),
+            UiPositionLens {
+                end: UiRect {
+                    left: Val::Auto,
+                    top: Val::Px(5.),
+                    right: Val::Px(5.),
+                    bottom: Val::Auto,
+                },
+                start: UiRect {
+                    left: Val::Auto,
+                    top: Val::Px(-100.),
+                    right: Val::Px(5.),
+                    bottom: Val::Auto,
+                },
+            },
+        )));
 }
