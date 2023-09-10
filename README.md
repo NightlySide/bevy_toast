@@ -61,4 +61,5 @@ fn keyboard_handler(
 
 | bevy | bevy_toast |
 | ---- | ---------- |
+| 0.10 | 0.2        |
 | 0.6  | 0.1        |
